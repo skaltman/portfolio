@@ -1,0 +1,16 @@
+---
+title: "README"
+output: 
+  github_document: default
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+# knitr options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Description
+
+I conducted a replication of Tworek & Cimpian (2016) as part of a class on experimental methods at Stanford. This folder contains the analysis I completed with the data I collected.
+
+## To view: http://rpubs.com/skaltman/257113

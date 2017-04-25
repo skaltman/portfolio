@@ -1,0 +1,358 @@
+---
+title: "Large-scale atrocities"
+author: "Sara Altman"
+output:
+  github_document:
+    toc: yes
+    toc_depth: 6
+---
+
+```{r setup, include=FALSE}
+# knitr options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+library(tidyverse)
+library(googlesheets)
+library(ggrepel)
+library(stringr)
+library(ggrepel)
+library(forcats)
+library(rvest)
+
+#params
+data_url <- "https://docs.google.com/spreadsheets/d/1N9mMdh2X47AfmDJ4XEw8CDe5CL5O6mfI3KPnzERaplk/edit#gid=1335230579"
+pop_url <- "https://docs.google.com/spreadsheets/d/1N9mMdh2X47AfmDJ4XEw8CDe5CL5O6mfI3KPnzERaplk/edit#gid=798338106"
+
+column_names <- as.character(seq(from = -500, to = 1900, by = 100))
+
+international_wars <- c("Second Persian War", "Alexander the Great", "First Punic War", "Second Punic War", "Third Mithridatic War", "Justinian", "Goguryeo-Sui Wars", "Crusades", "Chinggis Khan", "Hulagu’s Invasion", "Bahmani-Vijayanagara War", "Timur", "Russo-Tatar War", "Burma-Siam Wars", "Great Turkish War", "War of the Spanish Succession", "Great Northern War", "War of the Austrian Succession", "Sino-Dzungar War", "Seven Years War", "Napoleonic Wars", "Crimean War", "War of the Triple Alliance", "Franco-Prussian War", "Russo-Turkish War", "First World War", "Greco-Turkish War", "Second World War", "Korean War", "Iran-Iraq War")
+despots <- c("Qin Shi Huang Di", "Aurangzeb", "Peter the Great", "Shaka", "Joseph Stalin", "Mao Zedong", "North Korea", "Idi Amin", "Democratic Kampuchea", "Saddam Hussein")
+failed_states <- c("Age of Warring States", "Xin Dynasty", "The Three Kingdoms of China", "Fall of the Western Roman Empire", "Mayan Collapse", "Fall of the Yuan Dynasty", "Hundred Years War", "The Time of Troubles", "Thirty Years' War", "Fall of the Ming Dynasty", "Mexican Revolution", "Russian Civil War", "Chinese Civil War", "Soviet-Afghan War", "Somalian Chaos", "Second Congo War")
+oppression <- c("Gladiatorial Games", "Mideast Slave Trade", "Atlantic Slave Trade",  "Aztec Human Sacrifice", "Conquest of the Americas", "Congo Free State", "Famines in British India", "Expulsion of Germans from Eastern Europe", "Postwar Vietnam", "Sanctions against Iraq")
+colonial_wars <- c("Gallic War", "Roman-Jewish Wars", "Chinese Conquest of Vietnam", "Cromwell's Invasion of Ireland", "Haitian Slave Revolt", "Mexican War of Independence", "French Conquest of Algeria", "Mahdi Revolt", "Cuban Revolution", "Italo-Ethiopian War", "French Indochina War", "Algerian War of Independence", "Bengali Genocide")
+civil_wars <- c("Roman Slave Wars", "War of the Allies", "An Lushan Rebellion", "Fang La Rebellion", "Albigensian Crusade", "French Wars of Religion", "Taiping Rebellion", "American Civil War", "Panthay Rebellion", "Hui Rebellion", "Spanish Civil War", "Partition of India", "Indonesian Purge", "Vietnam War", "Biafran War", "War in the Sudan", "Ugandan Bush War", "Mengistu Haile", "Mozambican Civil War", "Angolan Civil War", "Rwandan Genocide")
+
+#answer params--don't include in questions
+cols_deaths <- "R:AP"
+cols_atrocities <- "A:N" 
+
+europe <- c("Second Persian War", "First Punic War", "Second Punic War", "Third Mithridatic War", "Justinian", "Russo-Tatar War","Great Turkish War", "War of the Spanish Succession", "Great Northern War", "War of the Austrian Succession", "Seven Years War", "Napoleonic Wars", "Crimean War", "Franco-Prussian War", "Russo-Turkish War", "First World War", "The Time of Troubles", "Gladiatorial Games", "Expulsion of Germans from Eastern Europe", "Fall of the Western Roman Empire", "Hundred Years War", "Russian Civil War", "Peter the Great", "Joseph Stalin", "Gallic War", "Cromwell's Invasion of Ireland", "Spanish Civil War", "French Wars of Religion", "Albigensian Crusade", "Roman Slave Wars", "War of the Allies")
+asia <- c("Alexander the Great", "Goguryeo-Sui Wars", "Crusades", "Chinggis Khan", "Hulagu’s Invasion", "Bahmani-Vijayanagara War", "Timur", "Burma-Siam Wars", "Sino-Dzungar War", "Greco-Turkish War", "Korean War", "Iran-Iraq War", "Famines in British India", "Postwar Vietnam", "Sanctions against Iraq", "Soviet-Afghan War", "Chinese Civil War", "Fall of the Ming Dynasty", "Fall of the Yuan Dynasty", "The Three Kingdoms of China", "Xin Dynasty", "Age of Warring States", "Qin Shi Huang Di", "Aurangzeb", "Mao Zedong", "North Korea", "Democratic Kampuchea", "Saddam Hussein", "Bengali Genocide", "French Indochina War", "Chinese Conquest of Vietnam", "Roman-Jewish Wars", "An Lushan Rebellion", "Fang La Rebellion", "Taiping Rebellion", "Panthay Rebellion", "Hui Rebellion", "Partition of India", "Indonesian Purge", "Vietnam War")
+americas <- c("War of the Triple Alliance", "Conquest of the Americas", "Aztec Human Sacrifice", "Mayan Collapse", "Mexican Revolution", "Haitian Slave Revolt", "Mexican War of Independence", "Cuban Revolution", "American Civil War")
+africa <- c("Congo Free State", "Atlantic Slave Trade", "Mideast Slave Trade", "Somalian Chaos", "Second Congo War", "Shaka", "Idi Amin", "French Conquest of Algeria", "Mahdi Revolt", "Italo-Ethiopian War", "Algerian War of Independence", "Rwandan Genocide", "Angolan Civil War", "Mozambican Civil War", "Mengistu Haile", "Ugandan Bush War", "War in the Sudan", "Biafran War")
+multiple <- c("Second World War")
+
+fill_continent_colors <- c("#BF9488", 
+                 "#C1BAA9",
+                 "#E5CAA2",
+                 "#B3C0C5",
+                 "#C6C5C3")
+```
+
+This challenge looks at large-scale atrocities over time. The data set is from *The Great Book of Horrible Things* by Matthew White. The Google Sheets data was compiled by Holden Karnofsky as part of his analysis for this blog post: http://blog.givewell.org/2015/07/08/has-violence-declined-when-large-scale-atrocities-are-systematically-included/#Sec2, which I recommend reading. Bill Marsh used this same data set to create a visualization for the New York Times (http://www.nytimes.com/imagepages/2011/11/06/opinion/06atrocities_timeline.html). Part of this challenge involves recreating this visualization. 
+
+### Read in data from googlesheets
+
+__q1.1__ Create a`googlesheet` object from the Google Sheets data set found at `data_url`. 
+```{r, message=FALSE}
+sheet <- gs_url(x = data_url)
+```
+
+__q1.2__ The original data is far from tidy. Read in the names, start dates, and end dates of all the atrocities. These can be found in the third quadrant. We only want the first, second-to-last, and last columns. Call the resulting tibble `atrocities`.
+
+Hint: look at `gs_read`.
+```{r, message=FALSE}
+atrocities <- 
+  sheet %>% 
+  gs_read(range = cell_cols(cols_atrocities), skip = 18, col_names = FALSE) %>% 
+  dplyr::select(atrocity = 1, 
+         start_year = 13,
+         end_year = 14)
+```
+
+__q1.3__ Now, read in the fourth quadrant up until (and including) column AP. Each column represents a 100-year period of time. The values represent the number of deaths due to the atrocity listed in column A. Set `col_names` equal to `columns` and keep `verbose` equal to `TRUE` (Don't worry--the column names won't stay numbers for long). Call this tibble `deaths`.
+```{r, message=FALSE}
+deaths <- gs_read(sheet, range = cell_cols(cols_deaths), 
+                  skip = 18, col_names = column_names)
+```
+
+__q1.4__ Inspect the tibble and look for anything unusual. Fix any problems you see. 
+```{r}
+deaths <-
+  deaths %>% 
+  mutate(`1600` = ifelse(typeof(`1600`) == "character", 0, `1600`))
+```
+
+__q1.5__ Bind `atrocities` and `deaths`. Tidy the data and name the resulting tibble atrocities_tidy. Create a variable `type` that represents the type of an atrocity (you can use the vectors of types given in the parameters section). 
+
+Note: You're probably going to end up with a lot of rows where the number of deaths is 0. I filtered them out so that there would be fewer rows and the tibble would be more interpretable, but it's not strictly necessary. 
+```{r}
+find_type <- function(atrocity) {
+  if (atrocity %in% colonial_wars) {return("colonial war")}
+  if (atrocity %in% international_wars) {return("international war")} 
+  if (atrocity %in% oppression) {return("institutional oppression")}
+  if (atrocity %in% failed_states) {return("failed states")}
+  if (atrocity %in% civil_wars) {return("civil war")}
+  if (atrocity %in% despots) {return("despots")}
+  else {return("NA")}
+}
+
+atrocities_tidy <- 
+  atrocities %>% 
+  bind_cols(deaths) %>% 
+  gather(key = "century", value = "deaths", 4:28, convert = TRUE) %>% 
+  filter(!(near(deaths, 0))) %>% 
+  mutate(type = map_chr(atrocity, find_type))
+```
+
+###Atrocities
+
+__q2__ Let's look at `atrocities_tidy`. Construct a couple plots that visualize the information. Look at the outliers. What can you conclude?
+
+```{r}
+atrocities_tidy <-
+  atrocities_tidy %>% 
+  mutate(length = end_year - start_year,
+         type = str_to_title(type)) 
+
+to_label <-
+  atrocities_tidy %>% 
+  group_by(type) %>% 
+  distinct(atrocity, start_year, length) %>% 
+  top_n(length, n = 2)
+  
+  
+atrocities_tidy %>% 
+  group_by(atrocity) %>% 
+  ggplot(aes(start_year, length)) +
+  geom_point() +
+  geom_smooth(method = loess, se = FALSE) +
+  geom_label_repel(aes(label = atrocity), size = 2, color = "black", 
+                   nudge_y = 25, data = to_label) +
+  labs(x = "Starting year",
+       y = "Length in years",
+       title = "Atrocity length in years by starting year") +
+  facet_wrap(~type) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+- Most of the major outliers in terms of length are not wars.
+- The length of non-war atrocities appears to have decreased over time after around 500, with a bump around 1500.
+- The longest atrocity was the Mideast Slave Trade, followed by the gladiatorial games. 
+- Civil war lengths haven't changed much across 2000 years. Neither have international war lengths, besides the bump around the crusades. 
+- The decline in length of atrocities due to instutional oppression is the most dramatic. 
+
+```{r}
+atrocities_top <-
+  atrocities_tidy %>% 
+  group_by(atrocity, start_year, end_year, length, type, century) %>% 
+  summarise(total = sum(deaths)) %>% 
+  group_by(century) %>% 
+  filter(near(total, max(total, na.rm = TRUE))) 
+
+atrocities_top %>% 
+  ggplot(aes(century, total)) +
+  geom_point(aes(color = type)) +
+  geom_text_repel(aes(label = atrocity), size = 2) +
+  scale_y_log10() +
+  scale_color_discrete(name = "Atrocity type") +
+  labs(title = "Deaths from the worst atrocity by century",
+       y = "Total deaths",
+       x = "Century") +
+  theme_minimal()
+```
+
+- It looks like the concentration of atrocities is higher after 1500, but this could either be due to better reporting, or just the fact that there are more people now and therefore more conflicts. 
+- The total number of deaths from war-atrocities has increased much more than the total number of deaths from non-war atrocities, which makes sense given the changes in weapons and tactics since 500 BC. 
+- It's not really that helpful to just look at total deaths, since the population now is much larger than it was in 500BC. I'd like to redo this plot but with percent of population killed instead of total killed. 
+- Genghis Khan is surprisingly close to WW2 (in terms of the total variation) given the population change differences between 1100 and the 1930s - 40s. 
+- The Mideast Slave Trade was the worst atrocity for four centuries.  
+
+```{r, fig.height = 10}
+atrocities_tidy %>% 
+  filter(century > 1100) %>% 
+  ggplot(aes(reorder(atrocity, deaths), deaths, fill = type)) +
+  geom_col(position = "dodge") +
+  facet_grid(century ~., scales = "free_y", space = "free_y") +
+  scale_y_log10() +
+  theme_minimal() +
+  theme(axis.text.y = element_text(size = 6),
+        strip.text = element_text(size = 8),
+        panel.grid.major.y = element_blank()) +
+  scale_fill_discrete(name = "Atrocity Type") +
+  coord_flip() +
+  labs(x = "Atrocity",
+       y = "Deaths",
+       title = "Deaths from atrocities by century, 1200-1900") 
+```
+
+
+###Population data
+
+__q3.1__ There's a limit to the conclusions we can draw without population data. You can find population data on the population sheet. Read in the data from the population sheet and store in a tibble. You only need the columns for year and population.
+
+```{r}
+population <- 
+  gs_read(sheet, ws = 3 , range = cell_cols("F:K"), 
+                  skip = 11, col_names = FALSE, verbose = FALSE) %>% 
+  dplyr::select(year = X1,
+         population = X6)
+```
+
+__q3.2__ Make a quick plot of the population data to check that it makes sense.
+
+```{r}
+population %>% 
+  ggplot(aes(year, population)) +
+  geom_line() +
+  labs(x = "Year",
+       y = "Population") +
+  theme_minimal()
+```
+
+
+__q3.3__ Now, join the population data with `atrocities_tidy`. Store the result in a new tibble. Think about how you want to deal with the differences in population across the time span of an atrocity. 
+
+```{r}
+#I realized that we don't actually need this population data, but if students want to either try to make the legends of the NY times plot or play around with the data, it could be useful
+#I also think either some of the death estimates are off, or some of the population statistics are off
+atrocities_pop <-
+  atrocities_tidy %>% 
+  left_join(population, by = c("start_year" = "year")) %>% 
+  rename(population_start = population) %>% 
+  left_join(population, by = c("end_year" = "year")) %>% 
+  rename(population_end = population)
+
+```
+
+__q3.4__ To recreate the plot, we're going to need a variable `total` that represents the total number of deaths due to an atrocity, a variable `percent_killed` that represents the percent of the world's total population killed in the atrocity, a variable `mean_year` that represents the median year of the atrocity, and a variable `percent_killed` that represents the percentage of the population killed by the atrocity. Create these variables. 
+
+
+```{r}
+find_continent <- function(atrocity) {
+  if (atrocity %in% europe) {return("europe")}
+  if (atrocity %in% africa) {return("africa")}
+  if (atrocity %in% asia) {return("asia")}
+  if (atrocity %in% americas) {return("americas")}
+  if (atrocity %in% multiple) {return("multiple")}
+  else {return("NA")}
+}
+
+by_atrocity <-
+  atrocities_pop %>% 
+  group_by(atrocity, start_year, end_year, length, 
+           population_start, population_end, type) %>%
+  summarise(total_deaths = sum(deaths, na.rm = TRUE)) %>% 
+  mutate(mean_year = mean(c(start_year, end_year), na.rm = TRUE),
+         mean_population = mean(c(population_start, population_end), na.rm = TRUE),
+         percent_killed = (total_deaths / mean_population)*100,
+         continent = map_chr(atrocity, find_continent))
+
+to_label_deaths <-
+  by_atrocity %>% 
+  group_by(type) %>% 
+  top_n(percent_killed, n = 3)
+
+by_atrocity %>% 
+  ggplot(aes(start_year, percent_killed)) +
+  geom_point() +
+  geom_smooth(method = loess, se = FALSE) +
+  geom_label_repel(aes(label = atrocity), size = 1.3, color = "black", 
+                   nudge_y = .25, label.padding = unit(.15, "lines"), 
+                   data = to_label_deaths) +
+  labs(x = "Starting year",
+       y = "Percent of mean population killed",
+       title = "Percentage of the population killed by an atrocity vs. starting year") +
+  facet_wrap(~type) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45))
+```
+
+- Deaths as a proportion of total population have stayed relatively constant across time for colonial wars, with some bumps. 
+- For institutional oppression and failed states, it looks like deaths as a proportion of total population has declined. 
+- Chinggis Khan is a major outlier. 
+
+###Deaths from atrocities over time
+
+__q3.4__ Use the package rvest to read in the data from Holden's summary table. 
+
+```{r}
+rate_table <- read_html(url_data) %>% 
+  html_node(css_selector) %>% 
+  html_table() %>% 
+  select(from = From, 
+         to = To,
+         name = Name,
+         sex = Sex,
+         birthdate = Lifespan) %>% 
+  slice(2:(n() - 1)) 
+```
+
+
+For this question, recreate (or improve upon) this plot from the New York Times: http://www.nytimes.com/imagepages/2011/11/06/opinion/06atrocities_timeline.html.
+
+
+__q3.5__ Recreate the New York Times plot. This doesn't have to be exact--the original author didn't use R to create the visualization.
+
+```{r, fig.width = 15, fig.height = 30}
+by_atrocity_rf <-
+  by_atrocity %>% 
+       mutate(death_millions = round(total_deaths / 1000000, 1),
+       label = str_c(atrocity, death_millions, sep = " "),
+       y_pos = (end_year %% 250)*7)
+
+for_labels_right <- 
+  by_atrocity_rf %>% 
+  filter(mean_year >= 1900)
+
+for_labels_left <-
+  by_atrocity_rf %>% 
+  filter(mean_year < 1900)
+  
+
+by_atrocity_rf %>% 
+  ggplot(aes(mean_year, y_pos, 
+             size = total_deaths, color = continent)) +
+  geom_point(alpha = .8) +
+  geom_text_repel(aes(end_year, y_pos, label = label), 
+                  size = 3, segment.size = .5, color = "black", 
+                  nudge_x = 1, nudge_y = -30, inherit.aes = FALSE, 
+                  min.segment.length = unit(2, "lines"),
+                  data = for_labels_right) +
+  geom_text_repel(aes(start_year, y_pos, label = label), 
+                  size = 3, segment.size = .5, color = "black",
+                  nudge_x = -3, nudge_y = -30, inherit.aes = FALSE, 
+                  min.segment.length = unit(2, "lines"),
+                  data = for_labels_left) +
+  geom_segment(aes(x = start_year, xend = end_year, 
+                   y = y_pos, yend = y_pos), 
+               size = .1, inherit.aes = FALSE) +
+  geom_vline(xintercept = 0, linetype = "dotted") +
+  geom_vline(xintercept = 1000, linetype = "dotted") +
+  facet_wrap(~type, ncol = 1, scales = "free_y") +
+  scale_x_continuous(breaks = seq(-400, 2600, 200), position = "top") +
+  scale_y_continuous(trans = "reverse", labels = NULL) +
+  scale_color_manual(values = fill_continent_colors) +
+  scale_radius(range = c(6, 36)) +
+  coord_cartesian(ylim = c(-100, 1900), xlim = c(-400, 2400)) +
+  theme_minimal() +
+  guides(size = FALSE,
+         color = guide_legend(title = "Continent", override.aes = list(size = 8))) +
+  theme_minimal() +
+  theme(
+   # aspect.ratio = .15,
+    panel.grid.major.x = element_line(linetype = "dotted"),
+    panel.grid.minor.x = element_line(linetype = "dotted"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    strip.text = element_text(size = 24, family = "Times", face = "bold", hjust = 0),
+    axis.text.x = element_text(size = 10, face = "bold"),
+    panel.background = element_rect(fill = NA, color = "black")
+  ) +
+  labs(x = NULL,
+       y = NULL) 
+```
+

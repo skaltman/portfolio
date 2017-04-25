@@ -1,0 +1,280 @@
+---
+title: "Mobility Map"
+author: "Sara"
+date: "March 20, 2017"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+---
+```{r setup, include=FALSE}
+# knitr options
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+# Libraries
+library(tidyverse)
+library(compare)
+library(sf)
+library(leaflet)
+library(leaflet.extras)
+library(readr)
+
+#files
+data_file <- "~/Downloads/mobility_data.csv"
+cz_center_file <- "~/Downloads/cz_centroids.rds"
+geom_file <- "~/Downloads/geom_data.rds"
+
+# Albers projection for 48 contiguous US states
+US_ALBERS <-
+  "+proj=aea +lat_1=29.5 +lat_2=45.5 +lat_0=37.5 +lon_0=-96 +x_0=0 +y_0=0"
+  # GPS long-lat projection
+WGS84 <- 
+  "+proj=longlat +datum=WGS84 +no_defs"
+
+  # Colors
+COLORS <- c(
+  "#FFFFE1",
+  "#FFFFC4",
+  "#FFFAAC",
+  "#FFD858",
+  "#FFD94F",
+  "#FEB93A",
+  "#FF7B00",
+  "#D64700",
+  "#BA1B00",
+  "#990200"
+)
+
+NA_COLOR <- "#f2f2f2"
+
+#codes for alaska and hawaii
+CZS_AK_HI <- c(
+  "34101",
+  "34102",
+  "34103",
+  "34104",
+  "34105",
+  "34106",
+  "34107",
+  "34108",
+  "34109",
+  "34110",
+  "34111",
+  "34112",
+  "34113",
+  "34114",
+  "34115",
+  "34701",
+  "34702",
+  "34703",
+  "35600"
+)
+
+DESCRIPTION <- 
+  c(stringr::str_c('<p style="font-weight: normal">',
+                   'This is <b style="font-weight: bold">very low</b>',
+                   ' compared with</br>the rest of the country.</p>'),
+    stringr::str_c('<p style="font-weight: normal">',
+                   'This is <b style="font-weight: bold">below average</b>',
+                   '</br>compared with the rest of the</br>country.</p>'),
+    stringr::str_c('<p style="font-weight: normal">',
+                   'This is <b style="font-weight: bold">about average</b>',
+                   '</br>compared with the rest of the</br>country.</p>'),    
+    stringr::str_c('<p style="font-weight: normal">',
+                   'This is <b style="font-weight: bold">above average</b>',
+                   '</br>compared with the rest of the</br>country.</p>'),
+    stringr::str_c('<p style="font-weight: normal">',
+                   'This is <b style="font-weight: bold">very high</b>',
+                   ' compared</br>with the rest of the country.</p>'))
+
+CZ_MOB_DOMAIN <- c(34, 42.11, 45.07, 48, 60.8)
+```
+
+Store data in a tibble:
+
+```{r, message=FALSE}
+#read in col names
+names <- read_csv(file = data_file, skip = 15, n_max = 0) 
+#read in data
+data <- read_csv(file = data_file, skip = 17, 
+                 col_names = attributes(names)$names) %>% 
+  slice(2:n()) %>% 
+  dplyr::select(cz = `Commuting Zone`,
+         cz_name = `CZ Name`,
+         intercept = `Income Age 26 Intercept`,
+         slope = `Income Age 26 Slope`)
+```
+
+Calculate absolute upward mobility measurement, as defined in Chetty et al. (2014):
+
+```{r}
+data <-
+  data %>% 
+  mutate(mobility = intercept + .25*slope)
+```
+
+Compute mean absolute mobility per commuting zone:
+
+```{r}
+data <-
+  data %>% 
+  group_by(cz, cz_name) %>% 
+  summarise(mean_mobility = mean(mobility*100, na.rm = TRUE)) %>% 
+  ungroup()
+```
+
+Read in geometry data:
+```{r}
+geom_data <- read_rds(geom_file) 
+
+geom <-
+  geom_data$q3 %>% 
+  st_transform(crs = WGS84) %>% 
+  mutate(cz = as.integer(cz_1990)) %>% 
+  dplyr::select(cz, geometry)
+```
+
+Join mobility data to geometry data:
+```{r}
+geom2 <-
+  geom %>% 
+  left_join(data, by = "cz") %>% 
+  st_transform(crs = WGS84)
+```
+
+Get state lines data:
+```{r}
+state_lines <- 
+  geom_data$q5 %>% 
+  st_transform(crs = WGS84)
+```
+
+Separate state name from commuting zone name:
+```{r}
+data <-
+  data %>% 
+  separate(cz_name, into = c("cz_name", "state"), sep = ", ")
+```
+
+The following function formats the name and mobility measure for a hover-over label.
+```{r}
+hover_format <- function(czname, mobility) {
+    if (is.na(mobility)) {
+    t <- '<span style="font-weight: normal">No data.</span>'
+  } else {
+    t <- 
+      stringr::str_c('<p style="font-weight: normal">',
+                     'In the ', 
+                     '<b style="font-weight: bold">', czname, '</b>', 
+                     ' area, absolute upward', 
+                     '</br>',
+                     ' mobility is ', 
+                     '<b style="font-weight: bold">', 
+                     htmltools::htmlEscape(format(mobility, digit = 3)),
+                     '.</p>',
+                     DESCRIPTION[findInterval(mobility, CZ_MOB_DOMAIN) + 1])
+  }
+  htmltools::HTML(t)
+}
+```
+
+Read in the centroid data (geometry for the center a given commuting zone):
+```{r}
+cz_center <- read_rds(cz_center_file) 
+```
+
+Color scale for the map:
+```{r}
+color_scale <- function(x) {
+    scale_fill_gradientn(colours = COLORS, 
+                       values = seq(max(data$mean_mobility, na.rm = TRUE), 
+                                     min(data$mean_mobility, na.rm = TRUE)) %>% 
+                                scales::rescale(),
+                       na.value = NA_COLOR,
+                       breaks = 26:52)$palette(scales::rescale(x)) %>% 
+    stringr::str_replace_na(replacement = "#F3F3F3")
+}
+```
+
+Labeling function for each commuting zone.
+```{r}
+label_format <- function(czname) {
+  mob <- data %>% 
+    filter(cz_name == czname) %>% 
+    .$mean_mobility
+    t <- 
+      stringr::str_c('<p>',
+                     '<b style="font-weight: bold">', czname, '</b>', 
+                     '</br>',
+                     '<b style="font-weight: normal">', 
+                     htmltools::htmlEscape(format(mob, digit = 3)), '</b>',
+                     '</p>')
+  htmltools::HTML(t)
+}
+```
+
+Plot:
+```{r}
+leaf_crs <- leafletCRS(crsClass = "L.Proj.CRS", 
+                  code = "EPSG:42303",
+                  proj4def = US_ALBERS, 
+                  resolutions = c(5500, 5500 / 5.5)) 
+
+leaf_options <- leafletOptions(crs = leaf_crs, maxZoom = 2)
+
+leaflet(options = leaf_options,
+        width = "1000px",
+        height = "650px") %>% 
+  addPolygons(data = geom2, 
+              group = "polygons",
+              fillOpacity = 1,
+              fillColor = ~color_scale(mean_mobility),
+              color = "white", 
+              weight = 0.1, 
+              opacity = 1,
+              highlightOptions = highlightOptions(color = "black",
+                                                  weight = 1,
+                                                  opacity = 1,
+                                                  bringToFront = TRUE,
+                                                  sendToBack = TRUE),
+              label = ~map2(cz_name, mean_mobility, hover_format),
+              labelOptions = 
+                labelOptions(direction = "down", 
+                             opacity = 1, 
+                             textOnly = TRUE,
+                             offset = c(0, 25),
+                             style = list('border' = '1px solid #BBBBBB',
+                                         'border-radius' = '0px',
+                                         'font-size' = '10px',
+                                         'background-color' = '#FFFFFF',
+                                         'line-height' = '110%'))) %>% 
+     addLabelOnlyMarkers(data = cz_center,
+                         group = "labels",
+                         label = ~map(czname, label_format),
+                         labelOptions =
+                               labelOptions(direction = "bottom",
+                                            noHide = 'T',
+                                            textOnly = T,
+                                            textsize = '10px',
+                                            style = list(
+                                              'text-align' = 'center',
+                                              'line-height' = '105%',
+                                              'font-size' = '9pt'
+                                            )
+                                            )) %>%
+  addPolylines(data = state_lines, 
+               group = "state_lines",
+               weight = 1,
+               color = "gray") %>% 
+  groupOptions(group = "labels", zoomLevels = 1) %>% 
+  addLegend(color = color_scale(seq(26, 52, 3)),
+              labels = as.character(seq(26, 52, 3)),
+              opacity = 1,
+              title = "Absolute upward mobility",
+              position = "bottomright") %>% 
+  setMapWidgetStyle(list(background = "white")) %>% 
+  setMaxBounds(-131, 20, -68, 48.42) 
+```
+
